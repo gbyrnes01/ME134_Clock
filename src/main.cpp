@@ -2,8 +2,8 @@
 #include <WiFi.h>
 #include <time.h>
 
-const char* ssid = "50BostonAve";
-const char* pass = "5715500301";
+const char* ssid = "something";
+const char* pass = "password";
 
 // NTP server details
 const char* ntpServer = "pool.ntp.org";
