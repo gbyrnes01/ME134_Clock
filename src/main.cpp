@@ -1,9 +1,10 @@
 #include <Arduino.h>
+#include <AccelStepper.h>
 #include <WiFi.h>
 #include <time.h>
 
-const char* ssid = "something";
-const char* pass = "password";
+const char* ssid = "Tufts_Robot";
+const char* pass = "";
 
 // NTP server details
 const char* ntpServer = "pool.ntp.org";
@@ -11,20 +12,21 @@ const char* ntpServer = "pool.ntp.org";
 // Eastern Time Zone (UTC - 5 hours, or UTC - 4 hours during Daylight Saving Time)
 const long  gmtOffset_sec = -5 * 3600;    // GMT offset in seconds
 const int   daylightOffset_sec = 3600;    // Daylight saving time offset in seconds
+const unsigned long  mircosToMin = 1000 * 1000 * 60;
 
-const int clockwise_sequence[4][4] = {{HIGH, LOW, HIGH, LOW},
-                                {LOW, HIGH, HIGH, LOW},
-                                {LOW, HIGH, LOW, HIGH},
-                                {HIGH, LOW, LOW, HIGH}};
+// Define pin connections
+const int stepPin = 22;
+const int dirPin = 23;
+const int buttonPin = 24;
 
-const int counterclockwise_sequence[4][4] = { {HIGH, LOW, LOW, HIGH},
-                                        {LOW, HIGH, LOW, HIGH},
-                                        {LOW, HIGH, HIGH, LOW},
-                                        {HIGH, LOW, HIGH, LOW}};
+// Misc Constants
+const unsigned long minToSteps = 20;
+const unsigned long hourToSteps = minToSteps * 60;
 
-int spinPhase = 0;
-int spinDelayMS = 10;
-const int stepperPins[4] = {3,4,5,6};
+bool button = false;
+unsigned long currentStepperPosition = 0;
+
+AccelStepper stepper(AccelStepper::DRIVER, stepPin, dirPin);
 
 
 void initTime() {
@@ -36,7 +38,7 @@ tm* LocalTime() {
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
     Serial.println("Failed to obtain time");
-    return;
+    return &timeinfo;
   }
   
   // Print formatted time
@@ -44,27 +46,34 @@ tm* LocalTime() {
   return &timeinfo;
 }
 
-void spin(int cycles) {
-  for (int i = 0; i < cycles; i++) {
-    digitalWrite(stepperPins[0], clockwise_sequence[spinPhase][0]);
-    digitalWrite(stepperPins[1], clockwise_sequence[spinPhase][1]);
-    digitalWrite(stepperPins[2], clockwise_sequence[spinPhase][2]);
-    digitalWrite(stepperPins[3], clockwise_sequence[spinPhase][3]);
-    delay(spinDelayMS);
-
-    spinPhase++;
-    if (spinPhase == 4) {
-      spinPhase = 0;
-    }
-  }
+void buttonPressed() {
+  button = true;
 }
+
+void buttonReleased() {
+  button = false;
+}
+
+void setupClock(tm* time) {
+  int hours = time->tm_hour;
+  int mins = time->tm_min;
+  if (hours > 12) {
+    hours = hours - 12;
+  }
+  unsigned long stepsToGo = (hours * hourToSteps) + (mins * minToSteps);
+  stepper.runToNewPosition(stepsToGo);
+  currentStepperPosition += stepsToGo;
+}
+
 
 void setup() {
   Serial.begin(115200);
   delay(4000);
   Serial.println("hello");
+
+  //Setup Wifi
   WiFi.mode(WIFI_STA);
-  WiFi.begin(ssid, pass);
+  WiFi.begin(ssid);
 
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print('.');
@@ -72,13 +81,59 @@ void setup() {
   }
   Serial.println(WiFi.localIP());
 
+  //Setup Time
   initTime();
+
+  //Setup Stepper
+  stepper.setMaxSpeed(1000);  // Max steps per second
+  stepper.setAcceleration(500);  // Steps per second^2
+
+  unsigned long currentMircos = micros();
+  unsigned long deltaTime = mircosToMin;
+
+  setupClock(LocalTime());
+
+  interrupts();
+  attachInterrupt(digitalPinToInterrupt(buttonPin), buttonPressed, RISING);
+  attachInterrupt(digitalPinToInterrupt(buttonPin), buttonReleased, RISING);
+
+  while (true) {
+    if ((micros() - currentMircos) > deltaTime) {
+      currentMircos = currentMircos + deltaTime;
+      if (button) {
+        deltaTime = mircosToMin / 10;
+      }
+      else {
+        deltaTime = mircosToMin;
+      }
+      stepper.move(currentStepperPosition + minToSteps);
+      currentStepperPosition =+ minToSteps;
+    }
+    stepper.run();
+  }
 }
 
 void loop() {
-  
-  LocalTime();
-  delay(1000);
-  
+  //nothing
 }
+
+
+
+
+
+
+
+// void setup() {
+//   target = *LocalTime()->tm_min + 1;
+//   while (true) {
+//     if (*LocalTime()->tm_min > target) {
+//       stepStepper();
+//       if (buttonPressed) {
+//         target = target + 0.1;
+//       }
+//       target = target + 1;
+//     }
+
+//   }
+// }
 
